@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 
-/// Màn hình hồ sơ người dùng, phong cách Netflix
+/// Màn hình hồ sơ người dùng với giao diện theo phong cách Netflix.
+///
+/// Hiển thị avatar và nút đăng xuất.
 class ProfileScreen extends StatelessWidget {
-  final VoidCallback onLogout; // Callback khi đăng xuất
-  const ProfileScreen({required this.onLogout, super.key});
+  /// Callback được gọi khi người dùng nhấn nút Đăng xuất.
+  final VoidCallback onLogout;
+  final String? userEmail;
+
+  const ProfileScreen({required this.onLogout, this.userEmail, super.key});
 
   @override
   Widget build(BuildContext context) {
-    final String userName = 'Mark'; // Tên người dùng giả lập
-    final String userEmail = 'mark@email.com'; // Email giả lập
     return Scaffold(
+      // Container chính với nền gradient.
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -20,77 +24,59 @@ class ProfileScreen extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // AppBar tùy chỉnh với gradient
-            Container(
-              padding: EdgeInsets.fromLTRB(16, 40, 16, 20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.redAccent, Colors.deepPurple],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Text(
-                    'Tài khoản',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // AppBar tùy chỉnh để có thể thêm gradient.
+            _buildCustomAppBar(),
+            // Phần thân chính của màn hình.
             Expanded(
               child: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Avatar người dùng với hiệu ứng
-                    AnimatedContainer(
-                      duration: Duration(milliseconds: 300),
+                    // Avatar người dùng với hiệu ứng viền.
+                    CircleAvatar(
+                      radius: 64,
+                      backgroundColor: Colors.redAccent.withOpacity(0.8),
                       child: CircleAvatar(
                         radius: 60,
+                        backgroundImage: AssetImage(
+                          'assets/avatar_placeholder.png',
+                        ),
+                        onBackgroundImageError: (e, s) =>
+                            print('Lỗi tải ảnh avatar'),
+                      ),
+                    ),
+                    SizedBox(height: 24),
+                    if (userEmail != null)
+                      Text(
+                        userEmail!,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    SizedBox(height: 24),
+                    // Nút Đăng xuất.
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.redAccent,
-                        child: CircleAvatar(
-                          radius: 56,
-                          backgroundImage: AssetImage('assets/avatar_placeholder.png'),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
                         ),
-                      ),
-                    ),
-                    SizedBox(height: 20),
-                    Text(
-                      userName,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      userEmail,
-                      style: TextStyle(color: Colors.white70, fontSize: 18),
-                    ),
-                    SizedBox(height: 32),
-                    AnimatedContainer(
-                      duration: Duration(milliseconds: 300), // Hiệu ứng nút
-                      width: 200,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent,
-                          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30),
                         ),
-                        onPressed: onLogout,
-                        icon: Icon(Icons.logout, color: Colors.white),
-                        label: Text(
-                          'Đăng xuất',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        elevation: 5,
+                      ),
+                      onPressed: onLogout,
+                      icon: Icon(Icons.logout, color: Colors.white),
+                      label: Text(
+                        'Đăng xuất',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -100,6 +86,41 @@ class ProfileScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Xây dựng một AppBar tùy chỉnh.
+  Widget _buildCustomAppBar() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 40, 16, 20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.red[900]!, Colors.deepPurple.shade900],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.person_pin, color: Colors.white, size: 30),
+          SizedBox(width: 12),
+          Text(
+            'Tài khoản của tôi',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }

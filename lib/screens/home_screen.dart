@@ -1,19 +1,41 @@
 import 'package:flutter/material.dart';
 import '../models/movie.dart';
 import '../services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'add_movie_screen.dart';
+import 'edit_movie_screen.dart';
 
+/// Màn hình chính của ứng dụng, hiển thị các danh sách phim.
+///
+/// Bao gồm một carousel banner cho các phim nổi bật và các hàng (rows)
+/// cho những danh mục phim khác nhau.
+/// Hỗ trợ chức năng kéo để làm mới (pull-to-refresh).
+/// Cung cấp các chức năng quản trị (thêm/sửa/xóa phim) nếu người dùng là admin.
 class HomeScreen extends StatefulWidget {
+  /// Callback được gọi khi người dùng nhấn nút đăng xuất.
   final VoidCallback onLogout;
+
+  /// Callback được gọi khi người dùng nhấn vào một bộ phim.
   final void Function(int movieId)? onMovieTap;
+
+  /// Cờ cho biết người dùng đã đăng nhập hay chưa.
   final bool isLoggedIn;
+
+  /// Cờ cho biết người dùng có phải là admin hay không.
   final bool isAdmin;
+
+  /// Token xác thực của người dùng.
   final String? token;
+
+  final String? userEmail;
+
   const HomeScreen({
     required this.onLogout,
     this.onMovieTap,
     this.isLoggedIn = false,
     this.isAdmin = false,
     this.token,
+    this.userEmail,
     super.key,
   });
 
@@ -22,33 +44,70 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  /// Danh sách các bộ phim được hiển thị trên màn hình.
   List<Movie> movies = [];
+
+  /// Cờ cho biết có đang tải dữ liệu từ API hay không.
   bool isLoading = true;
+
+  /// Chuỗi chứa thông báo lỗi nếu có.
   String? error;
+
+  Set<int> favoriteIds = {}; // Thêm state lưu id phim yêu thích
 
   @override
   void initState() {
     super.initState();
+    // Bắt đầu tải danh sách phim khi widget được khởi tạo.
     _fetchMovies();
+    _loadFavoriteIds();
   }
 
+  /// Tải danh sách phim từ [ApiService].
+  ///
+  /// Cập nhật trạng thái [isLoading] và [error] tương ứng.
   Future<void> _fetchMovies() async {
+    // Chỉ cập nhật state nếu widget vẫn còn trong cây widget.
+    if (!mounted) return;
     setState(() {
       isLoading = true;
       error = null;
     });
     try {
       final data = await ApiService.fetchMovies();
+      if (!mounted) return;
       setState(() {
         movies = data;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         error = e.toString();
         isLoading = false;
       });
     }
+  }
+
+  Future<void> _loadFavoriteIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final favoriteIdStrings = prefs.getStringList('favoriteMovies') ?? [];
+    setState(() {
+      favoriteIds = favoriteIdStrings.map(int.parse).toSet();
+    });
+  }
+
+  Future<void> _toggleFavorite(int id) async {
+    setState(() {
+      if (favoriteIds.contains(id)) {
+        favoriteIds.remove(id);
+      } else {
+        favoriteIds.add(id);
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final favoriteIdStrings = favoriteIds.map((id) => id.toString()).toList();
+    await prefs.setStringList('favoriteMovies', favoriteIdStrings);
   }
 
   @override
@@ -57,7 +116,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
-          'Cinema Hub',
+          'hẹ hẹ hẹ',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 24,
@@ -77,127 +136,111 @@ class _HomeScreenState extends State<HomeScreen> {
       body: RefreshIndicator(
         onRefresh: _fetchMovies,
         color: Colors.redAccent,
-        child: isLoading
-            ? ListView(
-                children: [
-                  SizedBox(height: 120),
-                  Center(child: CircularProgressIndicator()),
-                ],
-              )
-            : error != null
-            ? ListView(
-                children: [
-                  SizedBox(height: 120),
-                  Center(
-                    child: Text(
-                      'Lỗi: ' + error!,
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              )
-            : movies.isEmpty
-            ? ListView(
-                children: [
-                  SizedBox(height: 120),
-                  Center(
-                    child: Text(
-                      'Không có phim',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                ],
-              )
-            : ListView(
-                children: [
-                  _buildBannerCarousel(movies.take(3).toList()),
-                  SizedBox(height: 20),
-                  _buildMovieRow(
-                    'Phim nổi bật',
-                    movies.where((m) => m.rating >= 4).toList(),
-                  ),
-                  _buildMovieRow(
-                    'Phim tiếng Anh',
-                    movies.where((m) => m.language == 'English').toList(),
-                  ),
-                  _buildMovieRow(
-                    'Phim tiếng Pháp',
-                    movies.where((m) => m.language == 'France').toList(),
-                  ),
-                ],
-              ),
+        backgroundColor: Colors.black,
+        child: _buildBody(),
       ),
-      floatingActionButton: widget.isAdmin
-          ? FloatingActionButton(
-              backgroundColor: Colors.redAccent,
-              onPressed: () async {
-                // Mở màn thêm phim
-                final result = await Navigator.pushNamed(
-                  context,
-                  '/add_movie',
-                  arguments: widget.token,
-                );
-                if (result == true) _fetchMovies();
-              },
-              child: Icon(Icons.add),
-              tooltip: 'Thêm phim',
-            )
-          : null,
     );
   }
 
-  /// Banner lớn dạng carousel với animation
+  /// Xây dựng phần thân (body) của Scaffold, xử lý các trạng thái
+  /// loading, error, empty, và success.
+  Widget _buildBody() {
+    if (isLoading) {
+      return Center(child: CircularProgressIndicator(color: Colors.redAccent));
+    }
+    if (error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 50),
+            SizedBox(height: 10),
+            Text('Lỗi: ' + error!, style: TextStyle(color: Colors.white)),
+            SizedBox(height: 10),
+            ElevatedButton(onPressed: _fetchMovies, child: Text('Thử lại')),
+          ],
+        ),
+      );
+    }
+    if (movies.isEmpty) {
+      return Center(
+        child: Text('Không có phim nào', style: TextStyle(color: Colors.white)),
+      );
+    }
+    return ListView(
+      children: [
+        _buildMovieRow('Tất cả phim', movies),
+        SizedBox(height: 20),
+        _buildMovieRow(
+          'Phim nổi bật',
+          movies.where((m) => m.rating >= 4).toList(),
+        ),
+        _buildMovieRow(
+          'Phim tiếng Anh',
+          movies.where((m) => m.language == 'tiếng anh').toList(),
+        ),
+        _buildMovieRow(
+          'Phim tiếng Pháp',
+          movies.where((m) => m.language == 'eng').toList(),
+        ),
+        SizedBox(height: 20),
+        _buildAdminAddButton(),
+      ],
+    );
+  }
+
+  /// Xây dựng một carousel hiển thị các banner phim.
+  ///
+  /// [banners]: Danh sách các phim sẽ được hiển thị trong carousel.
   Widget _buildBannerCarousel(List<Movie> banners) {
+    if (banners.isEmpty) return SizedBox.shrink();
+
     return SizedBox(
       height: 220,
       child: PageView.builder(
         itemCount: banners.length,
-        controller: PageController(viewportFraction: 0.9),
+        // viewportFraction cho phép nhìn thấy một phần của banner tiếp theo.
+        controller: PageController(viewportFraction: 0.9, initialPage: 0),
         itemBuilder: (context, index) {
           final movie = banners[index];
-          return AnimatedContainer(
-            duration: Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-            child: GestureDetector(
-              onTap: () {
-                if (widget.onMovieTap != null) widget.onMovieTap!(movie.id);
-              },
-              child: Container(
-                margin: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  image: DecorationImage(
-                    image: movie.imageUrl != null && movie.imageUrl!.isNotEmpty
-                        ? NetworkImage(movie.imageUrl!)
-                        : AssetImage('assets/banner_placeholder.jpg')
-                              as ImageProvider,
-                    fit: BoxFit.cover,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.4),
-                      blurRadius: 8,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
+          return GestureDetector(
+            onTap: () => widget.onMovieTap?.call(movie.id),
+            child: Container(
+              margin: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                image: DecorationImage(
+                  image: movie.imageUrl != null && movie.imageUrl!.isNotEmpty
+                      ? NetworkImage(movie.imageUrl!)
+                      : AssetImage('assets/banner_placeholder.jpg')
+                            as ImageProvider,
+                  fit: BoxFit.cover,
                 ),
-                alignment: Alignment.bottomLeft,
-                child: Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.5),
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(16),
-                      bottomRight: Radius.circular(16),
-                    ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.4),
+                    blurRadius: 8,
+                    offset: Offset(0, 4),
                   ),
-                  child: Text(
-                    movie.name,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                ],
+              ),
+              // Lớp phủ ở dưới cùng để hiển thị tên phim.
+              alignment: Alignment.bottomLeft,
+              child: Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                ),
+                child: Text(
+                  movie.name ?? 'Không có tên', // Xử lý null ở đây
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
@@ -208,9 +251,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Một hàng phim cuộn ngang với animation
+  /// Xây dựng một hàng các poster phim cuộn theo chiều ngang.
+  ///
+  /// [title]: Tiêu đề của hàng (ví dụ: "Phim nổi bật").
+  /// [movies]: Danh sách các phim trong hàng này.
   Widget _buildMovieRow(String title, List<Movie> movies) {
-    if (movies.isEmpty) return SizedBox();
+    if (movies.isEmpty) return SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -226,168 +273,155 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         SizedBox(
-          height: 170,
-          child: ListView.separated(
+          height: 230, // Tăng chiều cao để chứa thêm thông tin (rating)
+          child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.symmetric(horizontal: 12),
             itemCount: movies.length,
-            separatorBuilder: (_, __) => SizedBox(width: 12),
             itemBuilder: (context, index) {
               final movie = movies[index];
-              return AnimatedContainer(
-                duration: Duration(milliseconds: 400),
-                curve: Curves.easeInOut,
-                child: GestureDetector(
-                  onTap: () async {
-                    if (widget.isAdmin) {
-                      // Hiện dialog chọn Sửa/Xóa
-                      final action = await showDialog<String>(
-                        context: context,
-                        builder: (context) => SimpleDialog(
-                          title: Text('Quản lý phim'),
-                          children: [
-                            SimpleDialogOption(
-                              onPressed: () => Navigator.pop(context, 'edit'),
-                              child: Text('Sửa phim'),
-                            ),
-                            SimpleDialogOption(
-                              onPressed: () => Navigator.pop(context, 'delete'),
-                              child: Text('Xóa phim'),
-                            ),
-                            SimpleDialogOption(
-                              onPressed: () => Navigator.pop(context),
-                              child: Text('Đóng'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (action == 'edit') {
-                        final result = await Navigator.pushNamed(
-                          context,
-                          '/edit_movie',
-                          arguments: {
-                            'id': movie.id,
-                            'name': movie.name,
-                            'imageUrl': movie.imageUrl ?? '',
-                            'token': widget.token,
-                          },
-                        );
-                        if (result == true) _fetchMovies();
-                      } else if (action == 'delete') {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: Text('Xác nhận xóa'),
-                            content: Text('Bạn có chắc muốn xóa phim này?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: Text('Hủy'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: Text(
-                                  'Xóa',
-                                  style: TextStyle(color: Colors.red),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirm == true) {
-                          final ok = await ApiService.deleteMovie(
-                            id: movie.id,
-                            token: widget.token ?? '',
-                          );
-                          if (ok) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Đã xóa phim!')),
-                            );
-                            _fetchMovies();
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Xóa phim thất bại!')),
-                            );
-                          }
-                        }
-                      }
-                    } else {
-                      if (widget.onMovieTap != null)
-                        widget.onMovieTap!(movie.id);
-                    }
-                  },
-                  child: Container(
-                    width: 120,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      image: DecorationImage(
-                        image:
-                            movie.imageUrl != null && movie.imageUrl!.isNotEmpty
-                            ? NetworkImage(movie.imageUrl!)
-                            : AssetImage('assets/movie_placeholder.jpg')
-                                  as ImageProvider,
-                        fit: BoxFit.cover,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.3),
-                          blurRadius: 6,
-                          offset: Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.bottomLeft,
-                    child: Container(
-                      width: double.infinity,
-                      padding: EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.6),
-                        borderRadius: BorderRadius.only(
-                          bottomLeft: Radius.circular(14),
-                          bottomRight: Radius.circular(14),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            movie.name,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Icon(Icons.star, color: Colors.amber, size: 15),
-                              SizedBox(width: 2),
-                              Text(
-                                '${movie.rating}',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              );
+              return _buildMovieCard(
+                movie,
+              ); // Sử dụng một hàm riêng để build card
             },
           ),
         ),
       ],
+    );
+  }
+
+  /// Xây dựng card cho một bộ phim trong hàng cuộn ngang.
+  ///
+  /// [movie]: Đối tượng phim để hiển thị.
+  Widget _buildMovieCard(Movie movie) {
+    final isFavorite = favoriteIds.contains(movie.id);
+    return GestureDetector(
+      onTap: () async {
+        widget.onMovieTap?.call(movie.id);
+      },
+      child: Container(
+        width: 140,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Card(
+                elevation: 4,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.network(
+                      movie.imageUrl ?? '',
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      errorBuilder: (context, e, s) =>
+                          Center(child: Icon(Icons.movie, color: Colors.grey)),
+                      loadingBuilder: (context, child, progress) =>
+                          progress == null
+                          ? child
+                          : Center(child: CircularProgressIndicator()),
+                    ),
+                    // Nút favorite
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: IconButton(
+                        icon: Icon(
+                          isFavorite ? Icons.favorite : Icons.favorite_border,
+                          color: Colors.redAccent,
+                        ),
+                        onPressed: () => _toggleFavorite(movie.id),
+                      ),
+                    ),
+                    // Nút edit cho admin
+                    if (widget.isAdmin)
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: IconButton(
+                          icon: Icon(Icons.edit, color: Colors.blueAccent),
+                          tooltip: 'Sửa phim',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => EditMovieScreen(
+                                  id: movie.id,
+                                  token: widget.token ?? '',
+                                  name: movie.name ?? '',
+                                  imageUrl: movie.imageUrl ?? '',
+                                  isAdmin: widget.isAdmin,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              movie.name ?? 'Không có tên',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.star, color: Colors.amber, size: 16),
+                SizedBox(width: 4),
+                Text(
+                  '${movie.rating}',
+                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Hàm helper để chuyển Movie thành chuỗi debug
+  String movieToDebugString(Movie movie) {
+    return '{id: ${movie.id}, name: ${movie.name ?? "null"}, duration: ${movie.duration}, language: ${movie.language}, rating: ${movie.rating}, genre: ${movie.genre}, imageUrl: ${movie.imageUrl}}';
+  }
+
+  // Thêm nút thêm phim cho admin ở cuối danh sách
+  Widget _buildAdminAddButton() {
+    if (!widget.isAdmin) return SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: ElevatedButton.icon(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AddMovieScreen(
+                token: widget.token ?? '',
+                isAdmin: widget.isAdmin,
+              ),
+            ),
+          );
+        },
+        icon: Icon(Icons.add),
+        label: Text('Thêm phim'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.redAccent,
+          foregroundColor: Colors.white,
+        ),
+      ),
     );
   }
 }

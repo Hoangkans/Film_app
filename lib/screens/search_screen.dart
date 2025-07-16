@@ -1,59 +1,98 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/movie.dart';
 import '../services/api_service.dart';
 import 'movie_detail_screen.dart';
-import 'dart:async';
 
-/// Màn hình tìm kiếm phim kiểu Netflix
+/// Màn hình tìm kiếm phim với giao diện và tính năng tương tự Netflix.
+///
+/// Người dùng có thể nhập từ khóa để tìm kiếm. Kết quả sẽ được cập nhật
+/// sau một khoảng trễ ngắn (debounce) để tối ưu hiệu suất.
+/// Màn hình hiển thị hiệu ứng shimmer trong khi tải dữ liệu.
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  /// Token xác thực của người dùng (nếu có).
+  final String? token;
+  final bool isAdmin;
+
+  const SearchScreen({this.token, this.isAdmin = false, super.key});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
 class _SearchScreenState extends State<SearchScreen> {
-  /// Danh sách tất cả phim lấy từ API
-  List<Movie> allMovies = [];
+  /// Danh sách tất cả các bộ phim được lấy từ API.
+  /// LƯU Ý: Việc tìm kiếm phía client chỉ phù hợp với lượng dữ liệu nhỏ.
+  /// Với dữ liệu lớn, nên sử dụng API tìm kiếm của backend.
+  List<Movie> _allMovies = [];
 
-  /// Danh sách phim sau khi lọc theo từ khóa tìm kiếm
-  List<Movie> filteredMovies = [];
+  /// Danh sách phim đã được lọc dựa trên từ khóa tìm kiếm.
+  List<Movie> _filteredMovies = [];
 
-  /// Trạng thái loading khi lấy dữ liệu
-  bool isLoading = true;
+  /// Cờ báo hiệu trạng thái tải dữ liệu ban đầu.
+  bool _isLoading = true;
 
-  /// Từ khóa tìm kiếm hiện tại
-  String query = '';
+  /// Controller cho trường tìm kiếm.
+  final _searchController = TextEditingController();
 
+  /// Timer dùng cho kỹ thuật "debounce" để tránh việc tìm kiếm liên tục.
   Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _fetchMovies();
+    // Lắng nghe sự thay đổi của controller để bật/tắt nút clear
+    _searchController.addListener(() => setState(() {}));
   }
 
-  /// Lấy danh sách phim từ API
+  /// Lấy danh sách tất cả các phim từ API.
   Future<void> _fetchMovies() async {
+    if (!mounted) return;
     setState(() {
-      isLoading = true;
+      _isLoading = true;
     });
-    final movies = await ApiService.fetchMovies();
-    setState(() {
-      allMovies = movies;
-      filteredMovies = movies;
-      isLoading = false;
-    });
+
+    try {
+      final movies = await ApiService.fetchMovies();
+      if (!mounted) return;
+      setState(() {
+        _allMovies = movies;
+        // Nếu có query cũ thì lọc luôn, không thì hiển thị tất cả
+        if (_searchController.text.isNotEmpty) {
+          _onSearchChanged(_searchController.text);
+        } else {
+          _filteredMovies = movies;
+        }
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        // Có thể hiển thị SnackBar hoặc một widget lỗi ở đây.
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Lỗi tải phim: $e')));
+      });
+    }
   }
 
-  /// Lọc phim theo từ khóa tìm kiếm
-  void _onSearch(String value) {
+  /// Xử lý sự kiện khi người dùng thay đổi nội dung trong ô tìm kiếm.
+  ///
+  /// Sử dụng kỹ thuật debounce: chỉ thực hiện tìm kiếm sau khi người dùng
+  /// đã ngừng gõ trong một khoảng thời gian ngắn (300ms).
+  void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
       setState(() {
-        query = value;
-        filteredMovies = allMovies
-            .where((m) => m.name.toLowerCase().contains(value.toLowerCase()))
+        _filteredMovies = _allMovies
+            .where(
+              (movie) => (movie.name ?? '').toLowerCase().contains(
+                query.toLowerCase(),
+              ),
+            )
             .toList();
       });
     });
@@ -61,6 +100,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    // Hủy bỏ các controller và timer để tránh rò rỉ bộ nhớ.
+    _searchController.dispose();
     _debounce?.cancel();
     super.dispose();
   }
@@ -72,202 +113,214 @@ class _SearchScreenState extends State<SearchScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        // Thanh tìm kiếm được đặt ngay trên AppBar.
         title: TextField(
+          controller: _searchController,
           style: TextStyle(color: Colors.white, fontSize: 18),
+          autofocus: true, // Tự động focus vào ô tìm kiếm khi mở màn hình.
           decoration: InputDecoration(
-            hintText: 'Tìm kiếm phim...',
+            hintText: 'Tìm kiếm theo tên phim...',
             hintStyle: TextStyle(color: Colors.white54),
             border: InputBorder.none,
             prefixIcon: Icon(Icons.search, color: Colors.white54),
-            filled: true,
-            fillColor: Colors.white10,
-            contentPadding: EdgeInsets.symmetric(vertical: 8),
+            suffixIcon: _searchController.text.isNotEmpty
+                ? IconButton(
+                    icon: Icon(Icons.clear, color: Colors.white54),
+                    onPressed: () {
+                      _searchController.clear();
+                      _onSearchChanged('');
+                    },
+                  )
+                : null,
           ),
-          onChanged: _onSearch,
+          onChanged: _onSearchChanged,
         ),
       ),
       body: RefreshIndicator(
         onRefresh: _fetchMovies,
         color: Colors.redAccent,
-        child: isLoading
-            ? GridView.builder(
-                padding: EdgeInsets.all(8),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  childAspectRatio: 0.6,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-                itemCount: 9,
-                itemBuilder: (context, index) => _buildShimmerCard(),
-              )
-            : filteredMovies.isEmpty
-            ? Center(
-                child: Text(
-                  'Không tìm thấy phim nào',
-                  style: TextStyle(color: Colors.white),
-                ),
-              )
-            : Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: GridView.builder(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    childAspectRatio: 0.6,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: filteredMovies.length,
-                  itemBuilder: (context, index) {
-                    final movie = filteredMovies[index];
-                    return GestureDetector(
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              MovieDetailScreen(id: movie.id, token: ''),
-                        ),
-                      ),
-                      child: AnimatedContainer(
-                        duration: Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 8,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Stack(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(14),
-                                image: DecorationImage(
-                                  image:
-                                      movie.imageUrl != null &&
-                                          movie.imageUrl!.isNotEmpty
-                                      ? NetworkImage(movie.imageUrl!)
-                                      : AssetImage(
-                                              'assets/movie_placeholder.jpg',
-                                            )
-                                            as ImageProvider,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              left: 0,
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                padding: EdgeInsets.symmetric(
-                                  vertical: 8,
-                                  horizontal: 10,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.7),
-                                  borderRadius: BorderRadius.only(
-                                    bottomLeft: Radius.circular(14),
-                                    bottomRight: Radius.circular(14),
-                                  ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      movie.name,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    SizedBox(height: 2),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.star,
-                                          color: Colors.amber,
-                                          size: 15,
-                                        ),
-                                        SizedBox(width: 2),
-                                        Text(
-                                          '${movie.rating}',
-                                          style: TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                        if (movie.language != null) ...[
-                                          SizedBox(width: 8),
-                                          Text(
-                                            movie.language!,
-                                            style: TextStyle(
-                                              color: Colors.white54,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
+        backgroundColor: Colors.black,
+        child: _buildBody(),
       ),
     );
   }
 
+  /// Xây dựng phần thân của màn hình, xử lý các trạng thái khác nhau.
+  Widget _buildBody() {
+    if (_isLoading) {
+      return _buildLoadingGrid(); // Hiển thị hiệu ứng shimmer khi tải.
+    }
+
+    if (_allMovies.isNotEmpty && _filteredMovies.isEmpty) {
+      return _buildEmptyState(
+        'Không tìm thấy phim nào cho "${_searchController.text}"',
+      );
+    }
+
+    if (_allMovies.isEmpty && !_isLoading) {
+      return _buildEmptyState('Không có phim nào để tìm kiếm.');
+    }
+
+    return _buildResultsGrid(); // Hiển thị kết quả tìm kiếm.
+  }
+
+  /// Xây dựng lưới hiển thị kết quả tìm kiếm.
+  Widget _buildResultsGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(8.0),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.65, // Tăng chiều cao một chút
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: _filteredMovies.length,
+      itemBuilder: (context, index) {
+        final movie = _filteredMovies[index];
+        return _buildMovieCard(movie);
+      },
+    );
+  }
+
+  /// Xây dựng card cho một bộ phim.
+  Widget _buildMovieCard(Movie movie) {
+    return GestureDetector(
+      onTap: () {
+        final String? token = widget.token;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MovieDetailScreen(
+              id: movie.id,
+              token: token,
+              isAdmin: widget.isAdmin,
+            ),
+          ),
+        );
+      },
+      child: Card(
+        clipBehavior: Clip.antiAlias,
+        elevation: 4,
+        color: Colors.grey[900],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Image.network(
+                movie.imageUrl ?? '',
+                fit: BoxFit.cover,
+                width: double.infinity,
+                errorBuilder: (context, e, s) =>
+                    Center(child: Icon(Icons.movie, color: Colors.grey)),
+                loadingBuilder: (context, child, progress) => progress == null
+                    ? child
+                    : Center(child: CircularProgressIndicator()),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    movie.name ?? 'Không có tên',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(Icons.star, color: Colors.amber, size: 14),
+                      SizedBox(width: 2),
+                      Text(
+                        '${movie.rating}',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                      SizedBox(width: 8),
+                      if (movie.language != null)
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.language,
+                              color: Colors.white54,
+                              size: 13,
+                            ),
+                            SizedBox(width: 2),
+                            Text(
+                              movie.language!,
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  if (movie.duration != null)
+                    Text(
+                      'Thời lượng: ${movie.duration}',
+                      style: TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                  if (movie.genre != null)
+                    Text(
+                      'Thể loại: ${movie.genre}',
+                      style: TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Xây dựng lưới các card shimmer để làm hiệu ứng tải.
+  Widget _buildLoadingGrid() {
+    return GridView.builder(
+      padding: EdgeInsets.all(8),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.65,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemCount: 12, // Hiển thị 12 card shimmer
+      itemBuilder: (context, index) => _buildShimmerCard(),
+    );
+  }
+
+  /// Widget hiển thị trạng thái không có kết quả hoặc không có dữ liệu.
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off, color: Colors.white54, size: 80),
+          SizedBox(height: 16),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 18),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Widget xây dựng một card shimmer đơn.
   Widget _buildShimmerCard() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.grey[900],
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  colors: [Colors.grey[800]!, Colors.grey[700]!],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomLeft,
-            child: Container(
-              width: double.infinity,
-              padding: EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.5),
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(14),
-                  bottomRight: Radius.circular(14),
-                ),
-              ),
-              child: Container(height: 16, color: Colors.grey[800]),
-            ),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(12),
       ),
     );
   }
